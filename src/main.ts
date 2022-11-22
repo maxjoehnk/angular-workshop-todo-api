@@ -2,6 +2,10 @@ import "reflect-metadata"
 import * as express from 'express';
 import {plainToClassFromExist, plainToInstance} from "class-transformer";
 import { v4 as uuid } from "uuid";
+import {NextFunction, Request, Response} from "express";
+
+const userName = 'admin';
+const userPassword = 'passw0rd';
 
 const app = express();
 
@@ -15,7 +19,11 @@ class Todo {
 
 const todoStorage = new Map<string, Todo>();
 
-app.post('/api/todos', (req, res) => {
+const sessionStorage = new Set<string>();
+
+const todosRouter = express.Router();
+
+todosRouter.post('/', (req, res) => {
     const todo = plainToInstance(Todo, req.body);
     todo.id = uuid();
     todoStorage.set(todo.id, todo);
@@ -23,13 +31,13 @@ app.post('/api/todos', (req, res) => {
     res.json(todo);
 });
 
-app.get('/api/todos', (req, res) => {
+todosRouter.get('/', (req, res) => {
     const todos = [...todoStorage.values()];
 
     res.json(todos);
 });
 
-app.get('/api/todos/:todoId', (req, res, next) => {
+todosRouter.get('/:todoId', (req, res, next) => {
     const todoId = req.params.todoId;
     if (!todoStorage.has(todoId)) {
         return next(new NotFoundError());
@@ -39,7 +47,7 @@ app.get('/api/todos/:todoId', (req, res, next) => {
     res.json(todo);
 });
 
-app.delete('/api/todos/:todoId', (req, res, next) => {
+todosRouter.delete('/:todoId', (req, res, next) => {
     const todoId = req.params.todoId;
     if (!todoStorage.has(todoId)) {
         return next(new NotFoundError());
@@ -49,7 +57,7 @@ app.delete('/api/todos/:todoId', (req, res, next) => {
     res.sendStatus(204);
 });
 
-app.put('/api/todos/:todoId', (req, res, next) => {
+todosRouter.put('/:todoId', (req, res, next) => {
     const todoId = req.params.todoId;
     if (!todoStorage.has(todoId)) {
         return next(new NotFoundError());
@@ -61,12 +69,51 @@ app.put('/api/todos/:todoId', (req, res, next) => {
     res.sendStatus(204);
 })
 
+app.use('/api/todos', authenticationMiddleware, todosRouter);
+
+app.post('/api/login', (req, res) => {
+    if (!('username' in req.body && 'password' in req.body)) {
+       throw new UnauthenticatedError();
+    }
+    if (req.body.username !== userName || req.body.password != userPassword) {
+        throw new UnauthenticatedError();
+    }
+    const sessionToken = uuid();
+
+    sessionStorage.add(sessionToken);
+
+    res.json(sessionToken)
+});
+
 app.listen(8080, () => console.log('Listening on 8080'));
+
+function authenticationMiddleware(req: Request, res: Response, next: NextFunction) {
+    if (!req.headers.authorization) {
+        throw new UnauthenticatedError();
+    }
+    if (!req.headers.authorization.startsWith('Bearer')) {
+        throw new UnauthenticatedError();
+    }
+    const token = req.headers.authorization.substring('Bearer'.length).trim();
+    if (!sessionStorage.has(token)) {
+        throw new UnauthenticatedError();
+    }
+
+    next();
+}
 
 class NotFoundError extends Error {
     statusCode = 404;
 
     constructor() {
         super('Not found');
+    }
+}
+
+class UnauthenticatedError extends Error {
+    statusCode = 401;
+
+    constructor() {
+        super('Unauthenticated');
     }
 }
